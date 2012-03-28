@@ -5,10 +5,6 @@
 */
 #include <windows.h>
 
-int g_x, g_y, g_dx, g_dy;
-
-BOOL CALLBACK EnumChildProc(HWND hwnd, LPARAM lParam);
-
 BOOL CALLBACK FindWindowProc(HWND hwnd, LPARAM lParam)
 {
     HWND* pphWnd = (HWND*)lParam;
@@ -25,18 +21,18 @@ BOOL CALLBACK FindWindowProc(HWND hwnd, LPARAM lParam)
 LONG _declspec(dllexport) ToggleFullScreen()
 {
 	HWND hTop = NULL;
-	DWORD dwThreadID;
+    HWND hTextArea = NULL;
 
-	dwThreadID = GetCurrentThreadId();
-	EnumThreadWindows(dwThreadID, FindWindowProc, (LPARAM)&hTop);
+	EnumThreadWindows(GetCurrentThreadId(), FindWindowProc, (LPARAM)&hTop);
+    hTextArea = FindWindowEx(hTop, NULL, "VimTextArea", "Vim text area");
 
-	if (hTop)
+	if (hTop != NULL && hTextArea != NULL)
 	{
 		/* Determine the current state of the window */
-
 		if ( GetWindowLong(hTop, GWL_STYLE) & WS_CAPTION )
 		{
 			/* Has a caption, so isn't maximised */
+            int g_x, g_y, g_dx, g_dy;
 
 			MONITORINFO mi;
 			RECT rc;
@@ -46,7 +42,7 @@ LONG _declspec(dllexport) ToggleFullScreen()
 			hMonitor = MonitorFromRect(&rc, MONITOR_DEFAULTTONEAREST);
 
 			// 
-			// get the work area or entire monitor rect. 
+			// get the work area or entire monitor rect, if have multiple display monitors, the rect is current work area.
 			// 
 			mi.cbSize = sizeof(mi);
 			GetMonitorInfo(hMonitor, &mi);
@@ -59,56 +55,37 @@ LONG _declspec(dllexport) ToggleFullScreen()
 			//cy = GetSystemMetrics(SM_CYSCREEN);
 
 			/* Remove border, caption, and edges */
-			SetWindowLong(hTop, GWL_STYLE, GetWindowLong(hTop, GWL_EXSTYLE) & ~WS_BORDER); 
-			SetWindowLong(hTop, GWL_STYLE, GetWindowLong(hTop, GWL_STYLE) & ~WS_CAPTION); 
-			SetWindowLong(hTop, GWL_EXSTYLE, GetWindowLong(hTop, GWL_STYLE) & ~WS_EX_CLIENTEDGE); 
-			SetWindowLong(hTop, GWL_EXSTYLE, GetWindowLong(hTop, GWL_STYLE) & ~WS_EX_WINDOWEDGE); 
+			SetWindowLong(hTop, GWL_STYLE, GetWindowLong(hTop, GWL_STYLE) & ~WS_OVERLAPPEDWINDOW); 
+			SetWindowLong(hTop, GWL_EXSTYLE, GetWindowLong(hTop, GWL_EXSTYLE) & ~WS_EX_WINDOWEDGE); 
+            SetWindowPos(hTop, HWND_TOP, g_x, g_y, g_dx, g_dy, SWP_SHOWWINDOW);
+            // modify textarea
+            SetWindowLong(hTextArea, GWL_EXSTYLE, GetWindowLong(hTextArea, GWL_EXSTYLE) & ~WS_EX_CLIENTEDGE); 
 
-			SetWindowPos(hTop, HWND_TOP, g_x, g_y, g_dx, g_dy, SWP_SHOWWINDOW);
+            // use DC_BRUSH to modify textarea background brush color to darkblue(my vim colorschema)
+            {
+                HDC dc = GetDC(hTextArea);
+                if (dc != NULL)
+                {
+                    SetDCBrushColor(dc, RGB(0, 0, 64));
+                    ReleaseDC(hTextArea, dc);
+                }
+            }
+            // SetClassLong(hTextArea, GCL_HBRBACKGROUND, (LONG)CreateSolidBrush(RGB(0 ,0, 64)));
+            SetClassLong(hTextArea, GCL_HBRBACKGROUND, (LONG)GetStockObject(DC_BRUSH));
 
-			/* Now need to find the child text area window 
-			 * and set it's size accordingly 
-			 */
-			EnumChildWindows(hTop, EnumChildProc, 0);
-		}
-		else
-		{
-			/* Already full screen, so restore all the previous styles */
-			SetWindowLong(hTop, GWL_EXSTYLE, GetWindowLong(hTop, GWL_EXSTYLE) | WS_BORDER); 
-			SetWindowLong(hTop, GWL_STYLE, GetWindowLong(hTop, GWL_STYLE) | WS_CAPTION); 
-			SetWindowLong(hTop, GWL_STYLE, GetWindowLong(hTop, GWL_STYLE) | WS_SYSMENU); 
-			SetWindowLong(hTop, GWL_STYLE, GetWindowLong(hTop, GWL_STYLE) | WS_MINIMIZEBOX); 
-			SetWindowLong(hTop, GWL_STYLE, GetWindowLong(hTop, GWL_STYLE) | WS_MAXIMIZEBOX); 
-			SetWindowLong(hTop, GWL_STYLE, GetWindowLong(hTop, GWL_STYLE) | WS_SYSMENU); 
-			SetWindowLong(hTop, GWL_STYLE, GetWindowLong(hTop, GWL_STYLE) | WS_EX_CLIENTEDGE); 
-			SetWindowLong(hTop, GWL_STYLE, GetWindowLong(hTop, GWL_STYLE) | WS_EX_WINDOWEDGE); 
-			SetWindowLong(hTop, GWL_STYLE, GetWindowLong(hTop, GWL_STYLE) | WS_THICKFRAME); 
-			SetWindowLong(hTop, GWL_STYLE, GetWindowLong(hTop, GWL_STYLE) | WS_DLGFRAME); 
+            SetWindowPos(hTextArea, HWND_TOP, 0, 0, g_dx-g_x, g_dy-g_y, SWP_SHOWWINDOW);
+        }
+        else
+        {
+            /* Already full screen, so restore all the previous styles */
+            SetWindowLong(hTop, GWL_STYLE, GetWindowLong(hTop, GWL_STYLE) | WS_OVERLAPPEDWINDOW); 
+            SetWindowLong(hTop, GWL_EXSTYLE, GetWindowLong(hTop, GWL_EXSTYLE) | WS_EX_WINDOWEDGE); 
+            // modify textarea
+            SetWindowLong(hTextArea, GWL_EXSTYLE, GetWindowLong(hTextArea, GWL_EXSTYLE) | WS_EX_CLIENTEDGE); 
 
-
-			SendMessage(hTop, WM_SYSCOMMAND, SC_RESTORE, 0);
-			SendMessage(hTop, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
-		}
-	}
-	return GetLastError();
-}
-
-BOOL CALLBACK EnumChildProc(HWND hwnd, LPARAM lParam)
-{
-	char lpszClassName[100];
-	GetClassName(hwnd, lpszClassName, 100);
-	if ( strcmp(lpszClassName, "VimTextArea") == 0 ) 
-	{
-		//int cx, cy;
-		//cx = GetSystemMetrics(SM_CXSCREEN);
-		//cy = GetSystemMetrics(SM_CYSCREEN);
-
-		SetWindowLong(hwnd, GWL_EXSTYLE, GetWindowLong(hwnd, GWL_STYLE) & ~WS_EX_CLIENTEDGE); 
-		SetWindowLong(hwnd, GWL_EXSTYLE, GetWindowLong(hwnd, GWL_STYLE) & ~WS_EX_WINDOWEDGE); 
-		SetWindowPos(hwnd, HWND_TOP, 0, 0, g_dx, g_dy, SWP_SHOWWINDOW);
-
-    SetClassLong(hwnd, GCL_HBRBACKGROUND, CreateSolidBrush(RGB(0,0,0)));
-	}
-	return TRUE;
-	
+            SendMessage(hTop, WM_SYSCOMMAND, SC_RESTORE, 0);
+            SendMessage(hTop, WM_SYSCOMMAND, SC_MAXIMIZE, 0);
+        }
+    }
+    return GetLastError();
 }
